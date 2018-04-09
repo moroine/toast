@@ -8,6 +8,8 @@ var logger = require('jsdoc/util/logger');
 var path = require('jsdoc/path');
 var taffy = require('taffydb').taffy;
 var template = require('jsdoc/template');
+var ReadMe = require('jsdoc/readme');
+
 var util = require('util');
 
 var htmlsafe = helper.htmlsafe;
@@ -287,83 +289,121 @@ function attachModuleSymbols(doclets, modules) {
     });
 }
 
+function getTag(item, name) {
+    if(!item.tags) return null;
+    var tag = item.tags.filter(
+        function(tag) {
+            return (tag.originalTitle === name)
+        }
+    );
+    return tag.length? tag[0].value : null;
+}
+
 function buildMemberNav(items, itemHeading, itemsSeen, linktoFn) {
     var nav = '';
+    var docNameSpaces = {};
 
     if (items.length) {
         var itemsNav = '';
         var hasSubsectionOption = env.conf.templates && env.conf.templates.default && env.conf.templates.default.nav.subsection;
         var navSubsectionTypedef = hasSubsectionOption && env.conf.templates.default.nav.subsection.typedef;
+        var hasTemplates = hasSubsectionOption && env.conf.templates.default.nav.subsection.order;
         var navSubsectionClass = hasSubsectionOption && env.conf.templates.default.nav.subsection.class;
+        var navSubsectionOrder = hasTemplates || [];
 
         items.forEach(function(item) {
+            var currentItemsNav = '';
             var methods = find({kind:'function', memberof: item.longname});
             var members = find({kind:'member', memberof: item.longname});
             var typedef = find({kind:'typedef', memberof: item.longname});
             var classMember = find({kind:'class', memberof: item.longname});
+            var docNameSpace = getTag(item,"docNameSpace");
+            var keepGroup = false;
+
+            if(docNameSpace) {
+                if(Object.keys(docNameSpaces).indexOf(docNameSpace) === -1) {
+                    docNameSpaces[docNameSpace] = [];
+                }
+                keepGroup = true;
+            }
 
             if( navSubsectionClass && item.kind === 'class' && item.memberof) {
                 return;
             } else if ( !hasOwnProp.call(item, 'longname') ) {
-                itemsNav += '<li>' + linktoFn('', item.name);
-                itemsNav += '</li>';
+                currentItemsNav += '<li>' + linktoFn('', item.name);
+                currentItemsNav += '</li>';
             } else if ( !hasOwnProp.call(itemsSeen, item.longname) ) {
-                itemsNav += '<li>' + linktoFn(item.longname, item.name.replace(/^module:/, ''));
+                currentItemsNav += '<li>' + linktoFn(item.longname, item.name.replace(/^module:/, ''));
 
                 if (methods.length) {
-                    itemsNav += "<ul class='methods'>";
+                    currentItemsNav += "<ul class='methods'>";
 
                     methods.forEach(function (method) {
-                        itemsNav += "<li data-type='method'>";
-                        itemsNav += linkto(method.longname, method.name);
-                        itemsNav += "</li>";
+                        currentItemsNav += "<li data-type='method'>";
+                        currentItemsNav += linkto(method.longname, method.name);
+                        currentItemsNav += "</li>";
                     });
 
-                    itemsNav += "</ul>";
+                    currentItemsNav += "</ul>";
                 }
                 if (members.length) {
-                    itemsNav += "<ul class='members'>";
+                    currentItemsNav += "<ul class='members'>";
 
                     members.forEach(function (member) {
-                        itemsNav += "<li data-type='method'>";
-                        itemsNav += linkto(member.longname, member.name);
-                        itemsNav += "</li>";
+                        currentItemsNav += "<li data-type='method'>";
+                        currentItemsNav += linkto(member.longname, member.name);
+                        currentItemsNav += "</li>";
                     });
 
-                    itemsNav += "</ul>";
+                    currentItemsNav += "</ul>";
                 }
 
                 if (navSubsectionClass && classMember.length) {
-                    itemsNav += "<ul class='classes'>";
+                    currentItemsNav += "<ul class='classes'>";
 
                     classMember.forEach(function (classMember) {
-                        itemsNav += "<li data-type='method'>";
-                        itemsNav += linkto(classMember.longname, classMember.name);
-                        itemsNav += "</li>";
+                        currentItemsNav += "<li data-type='method'>";
+                        currentItemsNav += linkto(classMember.longname, classMember.name);
+                        currentItemsNav += "</li>";
                     });
 
-                    itemsNav += "</ul>";
+                    currentItemsNav += "</ul>";
                 }
 
                 if (navSubsectionTypedef && typedef.length) {
-                    itemsNav += "<ul class='typedefs'>";
+                    currentItemsNav += "<ul class='typedefs'>";
 
                     typedef.forEach(function (typedef) {
-                        itemsNav += "<li data-type='method'>";
-                        itemsNav += linkto(typedef.longname, typedef.name);
-                        itemsNav += "</li>";
+                        currentItemsNav += "<li data-type='method'>";
+                        currentItemsNav += linkto(typedef.longname, typedef.name);
+                        currentItemsNav += "</li>";
                     });
 
-                    itemsNav += "</ul>";
+                    currentItemsNav += "</ul>";
                 }
 
-                itemsNav += '</li>';
+                currentItemsNav += '</li>';
                 itemsSeen[item.longname] = true;
+
+                if(keepGroup) {
+                    docNameSpaces[docNameSpace].push(currentItemsNav)
+                } else {
+                    itemsNav += currentItemsNav;
+                }
             }
         });
 
+        navSubsectionOrder.map(
+            function (key) {
+                if(docNameSpaces.hasOwnProperty(key)) {
+                    itemsNav += "<li><ul><li class='doc-namespace'>"+key+"</li></ul></li>" + docNameSpaces[key].join("") + "";
+                }
+            }
+        );
+
         if (itemsNav !== '') {
-            nav += '<h3>' + itemHeading + '</h3><ul>' + itemsNav + '</ul>';
+            var render = '<h3>' + itemHeading + '</h3><ul>' + itemsNav + '</ul>';
+            nav += render;
         }
     }
 
@@ -393,10 +433,14 @@ function linktoExternal(longName, name) {
  * @return {string} The HTML for the navigation sidebar.
  */
 function buildNav(members) {
-    var nav = '<h2><a href="index.html">Home</a></h2>';
+    var nav = '<h2><a href="index.html">'+ ((env.conf.opts.mainpagetitle) ? env.conf.opts.mainpagetitle : "Home") +'</a></h2>';
     var seen = {};
     var seenTutorials = {};
 
+    if (env.conf.templates.default.changelog) {
+      nav += '<h3>Versioning</h3><ul><li><a href="CHANGELOG.html">Change log</a></li></ul>';
+    }
+    nav += buildMemberNav(members.tutorials, 'Tutorials', seenTutorials, linktoTutorial);
     nav += buildMemberNav(members.classes, 'Classes', seen, linkto);
     nav += buildMemberNav(members.modules, 'Modules', {}, linkto);
     nav += buildMemberNav(members.externals, 'Externals', seen, linktoExternal);
@@ -629,7 +673,7 @@ exports.publish = function(taffyData, opts, tutorials) {
     var files = find({kind: 'file'});
     var packages = find({kind: 'package'});
 
-    generate('', 'Home',
+    generate('', (opts.mainpagetitle) ? opts.mainpagetitle : 'Home',
         packages.concat(
             [{kind: 'mainpage', readme: opts.readme, longname: (opts.mainpagetitle) ? opts.mainpagetitle : 'Main Page'}]
         ).concat(files),
@@ -701,4 +745,20 @@ exports.publish = function(taffyData, opts, tutorials) {
     }
 
     saveChildren(tutorials);
+
+
+    function generateChangeLog(filename) {
+      var changelog = new ReadMe(filename);
+
+      var html = view.render('changelog.tmpl', { title: 'CHANGELOG', content: changelog.html });
+
+        // yes, you can use {@link} in tutorials too!
+        html = helper.resolveLinks(html); // turn {@link foo} into <a href="foodoc.html">foo</a>
+        fs.writeFileSync( path.join(outdir, "CHANGELOG.html"), html, 'utf8');
+    }
+
+    if (env.conf.templates.default.changelog) {
+      generateChangeLog(env.conf.templates.default.changelog);
+    }
+
 };
